@@ -1,0 +1,16 @@
+{
+  "name": "nulldex-admin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Admin inbox for nulldex.net: receive, read and send contact@nulldex.net email.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "mailparser": "^3.7.1"
+  }
+}

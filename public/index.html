@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Inbox · Nulldex Admin</title>
+  <link rel="icon" type="image/png" href="/assets/favicon-64.png">
+  <link rel="preload" href="/assets/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/fonts/outfit.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/app.css?v=2">
+  <script src="/app.js?v=2" defer></script>
+</head>
+<body>
+  <!-- LOGIN -->
+  <section id="login" class="login" hidden>
+    <form id="loginForm" class="login-card">
+      <img src="/assets/logo-full.png" alt="nulldex" class="login-logo" width="140" height="20">
+      <p class="mono muted">admin</p>
+      <input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password" required autofocus>
+      <button class="btn" type="submit">Log in</button>
+      <p class="error" id="loginError"></p>
+    </form>
+  </section>
+
+  <!-- APP -->
+  <div id="app" class="app" hidden>
+    <aside class="sidebar">
+      <img src="/assets/logo-full.png" alt="nulldex" class="side-logo" width="112" height="16">
+      <button class="btn compose-btn" id="composeBtn">+ New email</button>
+      <nav class="folders" id="folders">
+        <button data-folder="inbox" class="active">Inbox <span class="count" id="c-inbox"></span></button>
+        <button data-folder="sent">Sent</button>
+        <button data-folder="archive">Archive</button>
+        <button data-folder="trash">Trash</button>
+      </nav>
+      <div class="side-foot">
+        <span class="mono muted" id="meFrom"></span>
+        <div class="side-foot-actions">
+          <button class="link-btn" id="pwBtn">Password</button>
+          <button class="link-btn" id="logoutBtn">Log out</button>
+        </div>
+      </div>
+    </aside>
+
+    <section class="list-pane">
+      <div class="list-head">
+        <button class="icon-btn mobile-only" id="menuBtn" aria-label="Folders">☰</button>
+        <input type="search" id="search" placeholder="Search mail…" autocomplete="off">
+        <button class="icon-btn" id="refreshBtn" title="Refresh">↻</button>
+      </div>
+      <div class="list-title"><span id="folderTitle">Inbox</span><button class="link-btn" id="emptyTrash" hidden>Empty trash</button></div>
+      <ul class="list" id="list"></ul>
+    </section>
+
+    <section class="read-pane" id="readPane">
+      <div class="empty" id="emptyState">
+        <img src="/assets/logo-mark.png" alt="" width="64" height="32">
+        <p class="muted">Select a message</p>
+      </div>
+      <article class="message" id="message" hidden>
+        <div class="msg-actions">
+          <button class="icon-btn mobile-only" id="backBtn" aria-label="Back">←</button>
+          <button class="btn btn-small" id="replyBtn">Reply</button>
+          <button class="btn-ghost btn-small" id="archiveBtn">Archive</button>
+          <button class="btn-ghost btn-small" id="unreadBtn">Mark unread</button>
+          <button class="btn-ghost btn-small danger" id="deleteBtn">Delete</button>
+        </div>
+        <h1 class="msg-subject" id="msgSubject"></h1>
+        <div class="msg-meta">
+          <div class="avatar" id="msgAvatar"></div>
+          <div class="meta-main">
+            <div><strong id="msgFromName"></strong> <span class="muted" id="msgFromAddr"></span> <span class="badge" id="msgBadge" hidden>contact form</span></div>
+            <div class="muted small">to <span id="msgTo"></span></div>
+          </div>
+          <div class="muted small meta-date" id="msgDate"></div>
+        </div>
+        <ul class="attachments" id="msgAttachments"></ul>
+        <div class="msg-body" id="msgBody"></div>
+      </article>
+    </section>
+  </div>
+
+  <!-- COMPOSE -->
+  <dialog id="compose" class="dialog">
+    <form id="composeForm" method="dialog">
+      <div class="dialog-head"><strong id="composeTitle">New email</strong><button type="button" class="icon-btn" id="composeClose">✕</button></div>
+      <label>To<input type="text" name="to" required placeholder="name@example.com"></label>
+      <label>Cc<input type="text" name="cc" placeholder="optional"></label>
+      <label>Subject<input type="text" name="subject" required></label>
+      <textarea name="text" rows="14" required></textarea>
+      <input type="hidden" name="inReplyTo">
+      <div class="dialog-foot">
+        <span class="muted small" id="composeFrom"></span>
+        <span class="error" id="composeError"></span>
+        <button class="btn" type="submit" id="sendBtn">Send</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- PASSWORD -->
+  <dialog id="pwDialog" class="dialog dialog-small">
+    <form id="pwForm" method="dialog">
+      <div class="dialog-head"><strong>Change password</strong><button type="button" class="icon-btn" id="pwClose">✕</button></div>
+      <label>Current password<input type="password" name="current" required autocomplete="current-password"></label>
+      <label>New password (min 12)<input type="password" name="next" required minlength="12" autocomplete="new-password"></label>
+      <div class="dialog-foot"><span class="error" id="pwError"></span><button class="btn" type="submit">Save</button></div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" hidden></div>
+</body>
+</html>

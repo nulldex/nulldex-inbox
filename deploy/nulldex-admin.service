@@ -1,0 +1,30 @@
+[Unit]
+Description=Nulldex admin inbox
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nulldex
+Group=nulldex
+WorkingDirectory=/opt/nulldex-admin
+EnvironmentFile=/etc/nulldex-admin.env
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning server.js
+Restart=always
+RestartSec=3
+
+# hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/lib/nulldex-admin
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+node_modules/
+*.db
+*.db-wal
+*.db-shm
+.env
+*.env
+!.env.example
+data/
+deploy/server.local.ps1
+public/assets/
+*.log
