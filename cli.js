@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Admin command line:  nulldex-admin set-password | stats
+// Admin command line:  nulldex-admin set-password | disable-2fa | stats
 const auth = require("./src/auth");
 const db = require("./src/db");
 
@@ -36,9 +36,12 @@ function askHidden(prompt) {
     }
     auth.setPassword(p1);
     console.log("Password saved. All existing sessions were logged out.");
+  } else if (cmd === "disable-2fa") {
+    require("./src/totp").disable();
+    console.log("Two-factor authentication disabled. Log in with your password and set it up again.");
   } else if (cmd === "stats") {
     console.table(db.prepare("SELECT folder, COUNT(*) AS messages, SUM(read = 0) AS unread FROM messages GROUP BY folder").all());
   } else {
-    console.log("Usage: nulldex-admin set-password | stats");
+    console.log("Usage: nulldex-admin set-password | disable-2fa | stats");
   }
 })();

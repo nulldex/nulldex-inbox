@@ -6,6 +6,8 @@ const config = require("./src/config");
 const db = require("./src/db");
 const auth = require("./src/auth");
 const mail = require("./src/mail");
+const totp = require("./src/totp");
+const QRCode = require("qrcode");
 
 const FOLDERS = ["inbox", "sent", "archive", "trash"];
 const MIME = {
@@ -144,20 +146,27 @@ async function handleAdmin(req, res, url) {
   // CSRF guard: every state-changing call must carry our custom header
   if (req.method !== "GET" && req.headers["x-nulldex"] !== "1") throw new HttpError(403, "Forbidden");
 
+  // tells the login screen whether to show the 2FA code field
+  if (p === "/api/login-info" && req.method === "GET") return send(res, 200, { twoFactor: totp.isEnabled() });
+
   if (p === "/api/login" && req.method === "POST") {
     const ip = clientIp(req);
     if (auth.isLimited(`login:${ip}`, 5) || auth.isLimited("login:global", 20)) {
       throw new HttpError(429, "Too many failed attempts. Try again later.");
     }
-    const { password } = await readJson(req);
+    const { password, code } = await readJson(req);
     const stored = auth.getPasswordHash();
     if (!stored) throw new HttpError(503, "No password set yet. Run: nulldex-admin set-password");
-    if (typeof password !== "string" || !auth.verifyPassword(password, stored)) {
+    const twoFactor = totp.isEnabled();
+    const passOk = typeof password === "string" && auth.verifyPassword(password, stored);
+    const codeOk = passOk && (!twoFactor || totp.verify(code)); // code is only checked after a correct password
+    if (!passOk || !codeOk) {
       // only FAILED attempts count: 5 per IP per 15 min, 20 in total per hour (stops attackers with many IPs)
       auth.hit(`login:${ip}`, 15 * 60 * 1000);
       auth.hit("login:global", 60 * 60 * 1000);
       console.warn(new Date().toISOString(), "failed admin login from", ip);
-      throw new HttpError(401, "Wrong password");
+      // same message either way, so attackers can't tell whether the password was right
+      throw new HttpError(401, twoFactor ? "Wrong password or code" : "Wrong password");
     }
     const token = auth.createSession(ip, req.headers["user-agent"]);
     return send(res, 200, { ok: true }, { "set-cookie": auth.sessionCookie(token) });
@@ -170,7 +179,35 @@ async function handleAdmin(req, res, url) {
     return send(res, 200, { ok: true }, { "set-cookie": auth.clearCookie });
   }
   if (p === "/api/me" && req.method === "GET") {
-    return send(res, 200, { ok: true, from: config.mailFrom, canSend: !!config.brevoApiKey });
+    return send(res, 200, {
+      ok: true, from: config.mailFrom, canSend: !!config.brevoApiKey,
+      twoFactor: totp.isEnabled(), recoveryLeft: totp.isEnabled() ? totp.recoveryLeft() : 0,
+    });
+  }
+
+  // ---- two-factor setup ----
+  if (p === "/api/2fa/setup" && req.method === "POST") {
+    if (totp.isEnabled()) throw new HttpError(400, "2FA is already enabled");
+    const { secret, uri } = totp.startSetup(config.mailFrom, config.mailFromName || "Inbox");
+    const qr = await QRCode.toDataURL(uri, { margin: 1, width: 220, color: { dark: "#000000", light: "#ffffff" } });
+    return send(res, 200, { secret, qr });
+  }
+  if (p === "/api/2fa/enable" && req.method === "POST") {
+    const { code } = await readJson(req);
+    const recovery = totp.confirmSetup(String(code || "").trim());
+    if (!recovery) throw new HttpError(400, "That code didn't match. Check the time on your phone and try the newest code.");
+    return send(res, 200, { ok: true, recovery });
+  }
+  if (p === "/api/2fa/disable" && req.method === "POST") {
+    const { password, code } = await readJson(req);
+    const ip = clientIp(req);
+    if (auth.isLimited(`login:${ip}`, 5)) throw new HttpError(429, "Too many failed attempts. Try again later.");
+    if (!auth.verifyPassword(String(password || ""), auth.getPasswordHash()) || !totp.verify(code)) {
+      auth.hit(`login:${ip}`, 15 * 60 * 1000);
+      throw new HttpError(401, "Wrong password or code");
+    }
+    totp.disable();
+    return send(res, 200, { ok: true });
   }
   if (p === "/api/counts" && req.method === "GET") return send(res, 200, counts());
 

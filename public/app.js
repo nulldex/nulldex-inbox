@@ -12,7 +12,7 @@ async function api(path, opts = {}) {
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && path !== "/api/login") { showLogin(); throw new Error("Not logged in"); }
+  if (res.status === 401 && data.error === "Not logged in") { showLogin(); throw new Error("Not logged in"); }
   if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
   return data;
 }
@@ -34,16 +34,23 @@ function fmtDate(ms, long = false) {
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
 // ---------- login ----------
-function showLogin() { $("app").hidden = true; $("login").hidden = false; $("loginPassword").focus(); }
+async function showLogin() {
+  $("app").hidden = true; $("login").hidden = false; $("loginPassword").focus();
+  try {
+    const info = await api("/api/login-info");
+    $("loginCode").hidden = !info.twoFactor;
+    $("loginCode").required = info.twoFactor;
+  } catch (e) {}
+}
 
 $("loginForm").addEventListener("submit", async e => {
   e.preventDefault();
   $("loginError").textContent = "";
   try {
-    await api("/api/login", { method: "POST", body: { password: $("loginPassword").value } });
-    $("loginPassword").value = "";
+    await api("/api/login", { method: "POST", body: { password: $("loginPassword").value, code: $("loginCode").value } });
+    $("loginPassword").value = ""; $("loginCode").value = "";
     start();
-  } catch (err) { $("loginError").textContent = err.message; }
+  } catch (err) { $("loginError").textContent = err.message; $("loginCode").value = ""; }
 });
 
 // ---------- list ----------
@@ -246,8 +253,59 @@ $("composeForm").addEventListener("submit", async e => {
   finally { btn.disabled = false; }
 });
 
+// ---------- security: two-factor ----------
+function showTfView(view, me) {
+  for (const id of ["tfOff", "tfSetup", "tfRecovery", "tfOn"]) $(id).hidden = id !== view;
+  const on = view === "tfOn" || view === "tfRecovery";
+  $("tfPill").textContent = on ? "ON" : "OFF";
+  $("tfPill").classList.toggle("on", on);
+  $("tfStatus").textContent = on
+    ? (me && me.recoveryLeft != null ? `Active · ${me.recoveryLeft} recovery codes left` : "Active")
+    : "Not enabled";
+}
+
+$("secBtn").addEventListener("click", async () => {
+  const me = await api("/api/me");
+  showTfView(me.twoFactor ? "tfOn" : "tfOff", me);
+  $("tfOn").reset(); $("tfDisError").textContent = "";
+  $("secDialog").showModal();
+});
+$("secClose").addEventListener("click", () => $("secDialog").close());
+
+$("tfStart").addEventListener("click", async () => {
+  const s = await api("/api/2fa/setup", { method: "POST" });
+  $("tfQr").src = s.qr;
+  $("tfSecret").textContent = s.secret.match(/.{1,4}/g).join(" ");
+  $("tfCode").value = ""; $("tfError").textContent = "";
+  showTfView("tfSetup");
+  $("tfCode").focus();
+});
+
+$("tfSetup").addEventListener("submit", async e => {
+  e.preventDefault();
+  try {
+    const r = await api("/api/2fa/enable", { method: "POST", body: { code: $("tfCode").value } });
+    $("tfCodes").textContent = r.recovery.join("\n");
+    showTfView("tfRecovery");
+    $("tfQr").removeAttribute("src"); $("tfSecret").textContent = "";
+  } catch (err) { $("tfError").textContent = err.message; }
+});
+
+$("tfCopy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("tfCodes").textContent); toast("Recovery codes copied"); }
+  catch (e) { toast("Select the codes and copy them manually"); }
+});
+
+$("tfOn").addEventListener("submit", async e => {
+  e.preventDefault();
+  try {
+    await api("/api/2fa/disable", { method: "POST", body: { password: $("tfDisPw").value, code: $("tfDisCode").value } });
+    toast("2FA disabled"); showTfView("tfOff");
+  } catch (err) { $("tfDisError").textContent = err.message; }
+});
+
 // ---------- password ----------
-$("pwBtn").addEventListener("click", () => { $("pwForm").reset(); $("pwError").textContent = ""; $("pwDialog").showModal(); });
+$("pwBtn").addEventListener("click", () => { $("secDialog").close(); $("pwForm").reset(); $("pwError").textContent = ""; $("pwDialog").showModal(); });
 $("pwClose").addEventListener("click", () => $("pwDialog").close());
 $("pwForm").addEventListener("submit", async e => {
   e.preventDefault();

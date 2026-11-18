@@ -24,7 +24,8 @@ No mail server to run and no port 25: everything travels over HTTPS.
 - **Reply and compose** with proper `In-Reply-To` / `References` headers, so replies thread in Gmail and Outlook
 - **Contact form endpoint** for your public site, with a honeypot and rate limiting
 - **Never loses mail:** if the server is unreachable, the Cloudflare Worker forwards the email to a backup address
-- **Minimal footprint:** Node 22 built-in `node:sqlite`, a plain `http` server and one dependency (`mailparser`)
+- **Two-factor login** with any authenticator app (TOTP implemented with `node:crypto`, no auth libraries)
+- **Minimal footprint:** Node 22 built-in `node:sqlite`, a plain `http` server and two dependencies (`mailparser`, `qrcode`)
 - Dark, responsive UI that works on phones too
 
 ## Security
@@ -34,6 +35,7 @@ Everything sensitive is enforced on the server. The browser code is only a UI.
 | Threat | Protection |
 |---|---|
 | Password guessing | scrypt-hashed password; 5 failed logins per IP / 15 min plus 20 failed logins globally / hour |
+| Stolen password | optional **two-factor login (TOTP)**: Google Authenticator / Authy / any RFC 6238 app, with replay protection and 8 single-use recovery codes. The error never reveals which factor was wrong |
 | IP spoofing to dodge limits | listens on `127.0.0.1` only; the reverse proxy overwrites `X-Forwarded-For` |
 | Session theft | random 256-bit token, stored hashed; cookie is `HttpOnly`, `Secure`, `SameSite=Strict` |
 | CSRF | every state-changing request needs a custom header that cross-site requests can't send |
@@ -72,6 +74,7 @@ example.com {
 
 ```bash
 nulldex-admin set-password   # set or change the admin password (logs out all sessions)
+nulldex-admin disable-2fa    # emergency: turn off two-factor login if you lost your phone and recovery codes
 nulldex-admin stats          # message counts per folder
 ```
 

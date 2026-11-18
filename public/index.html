@@ -8,8 +8,8 @@
   <link rel="icon" type="image/png" href="/assets/favicon-64.png">
   <link rel="preload" href="/assets/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/assets/fonts/outfit.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/app.css?v=2">
-  <script src="/app.js?v=2" defer></script>
+  <link rel="stylesheet" href="/app.css?v=3">
+  <script src="/app.js?v=3" defer></script>
 </head>
 <body>
   <!-- LOGIN -->
@@ -18,6 +18,7 @@
       <img src="/assets/logo-full.png" alt="nulldex" class="login-logo" width="140" height="20">
       <p class="mono muted">admin</p>
       <input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password" required autofocus>
+      <input type="text" id="loginCode" placeholder="6-digit code from your app" autocomplete="one-time-code" inputmode="numeric" maxlength="11" hidden>
       <button class="btn" type="submit">Log in</button>
       <p class="error" id="loginError"></p>
     </form>
@@ -37,7 +38,7 @@
       <div class="side-foot">
         <span class="mono muted" id="meFrom"></span>
         <div class="side-foot-actions">
-          <button class="link-btn" id="pwBtn">Password</button>
+          <button class="link-btn" id="secBtn">Security</button>
           <button class="link-btn" id="logoutBtn">Log out</button>
         </div>
       </div>
@@ -96,6 +97,59 @@
         <button class="btn" type="submit" id="sendBtn">Send</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- SECURITY -->
+  <dialog id="secDialog" class="dialog dialog-small">
+    <div class="sec">
+      <div class="dialog-head"><strong>Security</strong><button type="button" class="icon-btn" id="secClose">✕</button></div>
+
+      <section class="sec-block">
+        <div class="sec-row">
+          <div><strong>Two-factor login</strong><p class="muted small" id="tfStatus"></p></div>
+          <span class="pill" id="tfPill"></span>
+        </div>
+
+        <!-- off: start setup -->
+        <div id="tfOff" hidden>
+          <p class="muted small">Require a 6-digit code from Google Authenticator (or any authenticator app) every time you log in.</p>
+          <button class="btn btn-small" id="tfStart">Enable 2FA</button>
+        </div>
+
+        <!-- setup: scan + confirm -->
+        <form id="tfSetup" hidden>
+          <ol class="steps-small muted small">
+            <li>Open Google Authenticator → <b>+</b> → <b>Scan a QR code</b></li>
+            <li>Scan this code (or type the key below by hand)</li>
+            <li>Enter the 6-digit code the app shows</li>
+          </ol>
+          <img id="tfQr" class="qr" alt="QR code for your authenticator app" width="220" height="220">
+          <code class="secret mono" id="tfSecret"></code>
+          <input type="text" id="tfCode" placeholder="123456" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required>
+          <div class="dialog-foot"><span class="error" id="tfError"></span><button class="btn btn-small" type="submit">Confirm</button></div>
+        </form>
+
+        <!-- recovery codes, shown once -->
+        <div id="tfRecovery" hidden>
+          <p class="small"><b>✓ 2FA is on.</b> Save these recovery codes somewhere safe (password manager, paper). Each works once if you lose your phone. <b>They won't be shown again.</b></p>
+          <pre class="recovery mono" id="tfCodes"></pre>
+          <button class="btn-ghost btn-small" id="tfCopy" type="button">Copy codes</button>
+        </div>
+
+        <!-- on: disable -->
+        <form id="tfOn" hidden>
+          <p class="muted small">To turn 2FA off, confirm with your password and a current code.</p>
+          <input type="password" id="tfDisPw" placeholder="Password" autocomplete="current-password" required>
+          <input type="text" id="tfDisCode" placeholder="6-digit code or recovery code" autocomplete="one-time-code" maxlength="11" required>
+          <div class="dialog-foot"><span class="error" id="tfDisError"></span><button class="btn-ghost btn-small danger" type="submit">Disable 2FA</button></div>
+        </form>
+      </section>
+
+      <section class="sec-block">
+        <div class="sec-row"><div><strong>Password</strong><p class="muted small">Change your admin password.</p></div>
+          <button class="btn-ghost btn-small" id="pwBtn" type="button">Change</button></div>
+      </section>
+    </div>
   </dialog>
 
   <!-- PASSWORD -->
