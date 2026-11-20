@@ -19,7 +19,9 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true
-ReadWritePaths=/var/lib/nulldex-admin
+ReadWritePaths=/var/lib/nulldex-admin -/run/nulldex-console
+# read Caddy access logs for website analytics
+SupplementaryGroups=caddy
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true

@@ -1,0 +1,19 @@
+[Unit]
+Description=Nulldex admin console (one persistent root shell for the web console)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/python3 -u /opt/nulldex-admin/console/console_helper.py
+Restart=always
+RestartSec=3
+# the socket lives here; only root and the nulldex group can open it
+RuntimeDirectory=nulldex-console
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+# restarting the helper also ends its shell; the next visit starts a fresh one
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

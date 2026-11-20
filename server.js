@@ -8,6 +8,17 @@ const auth = require("./src/auth");
 const mail = require("./src/mail");
 const totp = require("./src/totp");
 const QRCode = require("qrcode");
+const net = require("node:net");
+const { WebSocketServer } = require("ws");
+const stats = require("./src/stats");
+
+// terminal library for the console page, served from node_modules (the CSP only allows our own origin)
+const VENDOR = {
+  "/vendor/xterm.js": require.resolve("@xterm/xterm/lib/xterm.js"),
+  "/vendor/xterm.css": require.resolve("@xterm/xterm/css/xterm.css"),
+  "/vendor/addon-fit.js": require.resolve("@xterm/addon-fit/lib/addon-fit.js"),
+};
+const CONSOLE_SOCK = process.env.CONSOLE_SOCK || "/run/nulldex-console/console.sock";
 
 const FOLDERS = ["inbox", "sent", "archive", "trash"];
 const MIME = {
@@ -159,6 +170,10 @@ async function handleAdmin(req, res, url) {
     return send(res, 200, { ok: true, id });
   }
 
+  if (VENDOR[p]) {
+    res.writeHead(200, { "content-type": MIME[path.extname(p)], "cache-control": "public, max-age=604800" });
+    return fs.createReadStream(VENDOR[p]).pipe(res);
+  }
   if (!p.startsWith("/api/")) return serveStatic(req, res, p);
 
   // CSRF guard: every state-changing call must carry our custom header
@@ -228,6 +243,23 @@ async function handleAdmin(req, res, url) {
     return send(res, 200, { ok: true });
   }
   if (p === "/api/counts" && req.method === "GET") return send(res, 200, counts());
+
+  // ---- dashboard + analytics ----
+  if (p === "/api/dashboard" && req.method === "GET") {
+    const t = stats.traffic({ days: 7 });
+    const today = t.daily[t.daily.length - 1];
+    return send(res, 200, {
+      mail: { unread: counts().unread, latest: stats.latestMail(5) },
+      web: { today, daily: t.daily, totals: t.totals, topPage: t.pages[0] || null },
+      server: stats.server(),
+      console: { twoFactor: totp.isEnabled() },
+    });
+  }
+  if (p === "/api/analytics" && req.method === "GET") {
+    const days = [7, 30, 90].includes(Number(url.searchParams.get("days"))) ? Number(url.searchParams.get("days")) : 30;
+    const site = str(url.searchParams.get("site"), 100).toLowerCase();
+    return send(res, 200, { traffic: stats.traffic({ site, days }), mail: stats.mail(days), server: stats.server() });
+  }
 
   // change the sender name for one of your addresses
   if (p === "/api/addresses" && req.method === "PATCH") {
@@ -330,6 +362,53 @@ const server = http.createServer(async (req, res) => {
 
 // the site address (MAIL_FROM) is always one of yours. Done here, not in db.js: the CLI runs without the env file.
 db.prepare("INSERT OR IGNORE INTO addresses (address, name) VALUES (lower(?), ?)").run(config.mailFrom, config.mailFromName);
+
+// ---------- console: browser <-> websocket <-> unix socket <-> root shell helper ----------
+// Only for a logged-in session on an account WITH two-factor login. Read-only viewers (?ro=1, the dashboard
+// preview) see the output but their keystrokes are dropped here, before they reach the shell.
+const wss = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024 });
+server.on("upgrade", (req, socket, head) => {
+  const url = new URL(req.url, "http://localhost");
+  const deny = code => { socket.write(`HTTP/1.1 ${code} No\r\nConnection: close\r\n\r\n`); socket.destroy(); };
+  if (hostOf(req) !== config.adminHost || url.pathname !== "/api/console") return deny(404);
+  // a page on another site must not be able to open your console with your cookie
+  const origins = [`https://${config.adminHost}`];
+  if (config.adminHost === "localhost") origins.push(`http://localhost:${config.port}`); // local testing only
+  if (!origins.includes(req.headers.origin)) return deny(403);
+  if (!auth.isAuthenticated(req)) return deny(401);
+  if (!totp.isEnabled()) return deny(403);
+  const readOnly = url.searchParams.get("ro") === "1";
+  wss.handleUpgrade(req, socket, head, ws => openConsole(ws, readOnly, clientIp(req)));
+});
+
+function openConsole(ws, readOnly, ip) {
+  const up = net.createConnection(CONSOLE_SOCK);
+  if (!readOnly) console.log(new Date().toISOString(), "console opened from", ip);
+  const frame = (kind, payload) => {
+    const b = Buffer.from(payload);
+    const h = Buffer.alloc(5); h.writeUInt8(kind, 0); h.writeUInt32BE(b.length, 1);
+    return Buffer.concat([h, b]);
+  };
+  let pending = Buffer.alloc(0);
+  up.on("data", chunk => { // helper frames -> raw output to the browser
+    pending = Buffer.concat([pending, chunk]);
+    while (pending.length >= 5) {
+      const size = pending.readUInt32BE(1);
+      if (pending.length < 5 + size) break;
+      if (pending[0] === 0 && ws.readyState === 1) ws.send(pending.subarray(5, 5 + size), { binary: true });
+      pending = pending.subarray(5 + size);
+    }
+  });
+  up.on("error", () => { if (ws.readyState === 1) ws.close(1011, "console helper not running"); });
+  up.on("close", () => ws.close());
+  ws.on("message", (data, isBinary) => {
+    if (readOnly) return;
+    let m; try { m = JSON.parse(data.toString()); } catch { return; }
+    if (m.t === "i" && typeof m.d === "string") up.write(frame(0, m.d));
+    else if (m.t === "r" && Number.isInteger(m.c) && Number.isInteger(m.r)) up.write(frame(1, `${m.c},${m.r}`));
+  });
+  ws.on("close", () => { up.destroy(); if (!readOnly) console.log(new Date().toISOString(), "console closed from", ip); });
+}
 
 server.listen(config.port, config.host, () => {
   console.log(`nulldex-admin listening on ${config.host}:${config.port}`);

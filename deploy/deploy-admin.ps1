@@ -14,8 +14,8 @@ if (-not $assets) { $assets = Join-Path $PSScriptRoot "..\..\portfolio\assets" }
 
 Write-Host "Uploading app..."
 ssh -i $key -o BatchMode=yes $server 'rm -rf /tmp/nulldex-admin && mkdir -p /tmp/nulldex-admin/public/assets/fonts'
-scp -i $key -o BatchMode=yes -q -r "$app\server.js" "$app\cli.js" "$app\package.json" "$app\.env.example" "$app\src" "$app\deploy" "${server}:/tmp/nulldex-admin/"
-scp -i $key -o BatchMode=yes -q "$app\public\index.html" "$app\public\app.css" "$app\public\app.js" "${server}:/tmp/nulldex-admin/public/"
+scp -i $key -o BatchMode=yes -q -r "$app\server.js" "$app\cli.js" "$app\package.json" "$app\package-lock.json" "$app\.env.example" "$app\src" "$app\console" "$app\deploy" "${server}:/tmp/nulldex-admin/"
+scp -i $key -o BatchMode=yes -q "$app\public\index.html" "$app\public\app.css" "$app\public\app.js" "$app\public\dash.js" "${server}:/tmp/nulldex-admin/public/"
 # brand assets (logo, icon, fonts)
 scp -i $key -o BatchMode=yes -q "$assets\logo-full.png" "$assets\logo-mark.png" "$assets\favicon-64.png" "${server}:/tmp/nulldex-admin/public/assets/"
 scp -i $key -o BatchMode=yes -q "$assets\fonts\inter.woff2" "$assets\fonts\inter-ext.woff2" "$assets\fonts\outfit.woff2" "$assets\fonts\jetbrains-mono.woff2" "${server}:/tmp/nulldex-admin/public/assets/fonts/"

@@ -436,21 +436,81 @@ $("search").addEventListener("input", e => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => { state.q = e.target.value.trim(); closeMessage(); loadList({ animate: true }); }, 300);
 });
-$("logoutBtn").addEventListener("click", async () => { await api("/api/logout", { method: "POST" }).catch(() => {}); showLogin(); });
+$("logoutBtn").addEventListener("click", async () => {
+  if (currentView && viewHooks[currentView]?.hide) viewHooks[currentView].hide();
+  currentView = null;
+  await api("/api/logout", { method: "POST" }).catch(() => {}); showLogin();
+});
 
-// ---------- rail: Mail / Dashboard / Console ----------
-const VIEWS = ["mail", "dashboard", "console"];
+// ---------- rail: Dashboard / Mail / Analytics / Console ----------
+const VIEWS = ["dashboard", "mail", "analytics", "console"];
+const viewHooks = {}; // other scripts (dash.js) register: viewHooks.analytics = { show() {}, hide() {} }
+let currentView = null;
+
 function showView(name) {
-  if (!VIEWS.includes(name)) name = "mail";
+  if (!VIEWS.includes(name)) name = "dashboard";
+  if (name === currentView) return;
+  const prev = currentView;
+  currentView = name;
   for (const v of VIEWS) $(`view-${v}`).hidden = v !== name;
   document.querySelectorAll(".rail-btn[data-view]").forEach(b => b.classList.toggle("active", b.dataset.view === name));
-  if (location.hash.slice(1) !== name) history.replaceState(null, "", name === "mail" ? location.pathname : `#${name}`);
+  moveIndicator();
+  const want = name === "dashboard" ? location.pathname : `#${name}`;
+  if ((location.hash || "") !== (name === "dashboard" ? "" : `#${name}`)) history.replaceState(null, "", want);
+  if (prev && viewHooks[prev]?.hide) viewHooks[prev].hide();
+  if (viewHooks[name]?.show) viewHooks[name].show();
 }
+
+// the thin glowing line slides to the active rail button
+function moveIndicator() {
+  const btn = document.querySelector(".rail-btn[data-view].active"), ind = $("railInd");
+  if (!btn || !ind) return;
+  const horizontal = getComputedStyle($("rail")).flexDirection === "row";
+  ind.classList.toggle("h", horizontal);
+  ind.style.transform = horizontal
+    ? `translateX(${btn.offsetLeft + btn.offsetWidth / 2 - 9}px)`
+    : `translateY(${btn.offsetTop + btn.offsetHeight / 2 - 9}px)`;
+  ind.classList.add("ready");
+}
+window.addEventListener("resize", moveIndicator);
+
 $("rail").addEventListener("click", e => {
   const b = e.target.closest(".rail-btn[data-view]");
   if (b) showView(b.dataset.view);
 });
 window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
+// anything with data-go="mail|analytics|console" (dashboard cards) opens that page
+document.addEventListener("click", e => {
+  const go = e.target.closest("[data-go]");
+  if (go && !e.target.closest("[data-stop]")) showView(go.dataset.go);
+});
+
+// ---------- tooltips for the rail: quick, small, in the site's style ----------
+(() => {
+  const tip = $("tip");
+  let timer, current;
+  const show = btn => {
+    current = btn;
+    tip.textContent = btn.dataset.tip;
+    const r = btn.getBoundingClientRect();
+    const horizontal = getComputedStyle($("rail")).flexDirection === "row";
+    tip.classList.toggle("up", horizontal);
+    tip.hidden = false;
+    if (horizontal) { tip.style.left = `${r.left + r.width / 2 - tip.offsetWidth / 2}px`; tip.style.top = `${r.top - tip.offsetHeight - 10}px`; }
+    else { tip.style.left = `${r.right + 12}px`; tip.style.top = `${r.top + r.height / 2 - tip.offsetHeight / 2}px`; }
+    tip.classList.remove("on"); void tip.offsetWidth; tip.classList.add("on");
+  };
+  const hide = () => { clearTimeout(timer); current = null; tip.classList.remove("on"); tip.hidden = true; };
+  $("rail").addEventListener("pointerover", e => {
+    const b = e.target.closest("[data-tip]");
+    if (!b || b === current || e.pointerType === "touch") return;
+    clearTimeout(timer);
+    // first tooltip after a short pause; moving along the rail then switches instantly
+    timer = setTimeout(() => show(b), tip.hidden ? 120 : 0);
+  });
+  $("rail").addEventListener("pointerleave", hide);
+  $("rail").addEventListener("click", hide);
+})();
 
 // ---------- start ----------
 let pollTimer;
@@ -462,6 +522,7 @@ async function start() {
     $("meFrom").textContent = me.from;
     renderMailboxes();
     $("login").hidden = true; $("app").hidden = false;
+    currentView = null;
     showView(location.hash.slice(1));
     await loadList({ animate: true });
     clearInterval(pollTimer);
