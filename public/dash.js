@@ -22,6 +22,15 @@ function niceMax(v) {
   return (n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
 }
 
+// Redrawing identical content makes things blink (and kills an open hover tooltip), so every renderer first
+// compares a signature of what it would draw with what is already there.
+function same(box, ...parts) {
+  const sig = JSON.stringify(parts);
+  if (box.dataset.sig === sig) return true;
+  box.dataset.sig = sig;
+  return false;
+}
+
 // ---------------------------------------------------------------- charts (single series, monochrome)
 // One tooltip element per chart, positioned over the hovered mark.
 function chartTip(box) {
@@ -39,10 +48,12 @@ function placeTip(box, tip, x, y, html) {
 
 // bars: [{ label, value, tip: [line1, line2] }]
 function barChart(box, data, { height = 160, unit = "" } = {}) {
+  if (same(box, data, height, box.clientWidth)) return;
+  const first = !box.querySelector("svg"); // bars grow in only the first time, not on every refresh
   box.replaceChildren();
   const W = Math.max(240, box.clientWidth), H = height, padL = 30, padB = 22, padT = 8;
   const max = niceMax(Math.max(...data.map(d => d.value), 0));
-  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: "svg-chart", role: "img" });
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: "svg-chart" + (first ? " anim" : ""), role: "img" });
   const plotH = H - padB - padT, plotW = W - padL;
   // recessive grid + y labels
   for (let i = 0; i <= 2; i++) {
@@ -77,6 +88,7 @@ function barChart(box, data, { height = 160, unit = "" } = {}) {
 
 // line over time with crosshair: points [[ms, value]], fixed 0..100 scale for percentages
 function lineChart(box, points, { height = 140, max = 100, unit = "%" } = {}) {
+  if (same(box, points.length, points[points.length - 1], height, box.clientWidth)) return;
   box.replaceChildren();
   if (points.length < 2) { box.append(el("p", "faint small chart-empty", "Collecting data…")); return; }
   const W = Math.max(240, box.clientWidth), H = height, padL = 30, padB = 22, padT = 8;
@@ -114,6 +126,8 @@ function lineChart(box, points, { height = 140, max = 100, unit = "%" } = {}) {
 
 // ranked list with thin bars: [{ key, n }]
 function barList(ul, items, empty = "Nothing yet") {
+  if (same(ul, items)) return;
+  ul.classList.toggle("anim", !ul.children.length); // rows slide in only the first time
   ul.replaceChildren();
   if (!items.length) { ul.append(el("li", "faint small bars-empty", empty)); return; }
   const max = items[0].n;
@@ -137,6 +151,8 @@ function meter(label, used, total, text) {
 }
 
 function healthBlock(box, s, wide = false) {
+  if (same(box, s.cpu, s.load, s.mem.used >> 20, s.disk.used >> 24, Math.floor(s.uptime / 60), wide && s.net.rx >> 20, wide && s.net.tx >> 20,
+    s.sites.map(x => [x.up, x.ms]), s.services)) return;
   box.replaceChildren();
   const meters = el("div", "meters");
   meters.append(
@@ -222,25 +238,29 @@ function greeting() {
   return `${h < 5 ? "Late night" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"} · ${new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}`;
 }
 
+const setText = (id, t) => { const e = $(id); if (e.textContent !== t) e.textContent = t; };
+
 async function loadDashboard() {
   let d;
   try { d = await api("/api/dashboard"); } catch { return; }
-  $("dashGreeting").textContent = greeting();
+  setText("dashGreeting", greeting());
   // tiles
-  $("dUnread").textContent = num(d.mail.unread);
-  $("dUnreadSub").textContent = d.mail.unread ? "waiting for you" : "inbox zero";
+  setText("dUnread", num(d.mail.unread));
+  setText("dUnreadSub", d.mail.unread ? "waiting for you" : "inbox zero");
   $("railUnread").hidden = !d.mail.unread;
   const today = d.web.today || { visitors: 0, views: 0 };
-  $("dVisitors").textContent = num(today.visitors);
-  $("dVisitorsSub").textContent = `${num(today.views)} page views`;
-  $("dCpu").textContent = `${Math.round(d.server.cpu)}%`;
-  $("dCpuSub").textContent = `load ${d.server.load[0].toFixed(2)}`;
+  setText("dVisitors", num(today.visitors));
+  setText("dVisitorsSub", `${num(today.views)} page views`);
+  setText("dCpu", `${Math.round(d.server.cpu)}%`);
+  setText("dCpuSub", `load ${d.server.load[0].toFixed(2)}`);
   const memPct = d.server.mem.total ? Math.round(100 * d.server.mem.used / d.server.mem.total) : 0;
-  $("dMem").textContent = `${memPct}%`;
-  $("dMemSub").textContent = `${bytes(d.server.mem.used)} of ${bytes(d.server.mem.total)}`;
+  setText("dMem", `${memPct}%`);
+  setText("dMemSub", `${bytes(d.server.mem.used)} of ${bytes(d.server.mem.total)}`);
 
   // recent mail
-  const ul = $("dMail"); ul.replaceChildren();
+  const ul = $("dMail");
+  if (!same(ul, d.mail.latest)) {
+  ul.replaceChildren();
   if (!d.mail.latest.length) ul.append(el("li", "faint small mini-empty", "No mail yet"));
   for (const m of d.mail.latest) {
     const li = el("li", m.read ? "" : "unread"); li.dataset.stop = "1";
@@ -250,6 +270,7 @@ async function loadDashboard() {
     li.addEventListener("click", async () => { showView("mail"); await openMessage(m.id); });
     ul.append(li);
   }
+  }
 
   barChart($("dTraffic"), d.web.daily.map(x => ({ label: dayLabel(x.day), value: x.visitors, tip: [dayLabel(x.day, true), `${num(x.visitors)} visitors · ${num(x.views)} views`] })), { height: Math.max(150, $("dTraffic").clientHeight) });
   healthBlock($("dHealth"), d.server);
@@ -257,7 +278,7 @@ async function loadDashboard() {
   // console preview (read-only)
   dash.twoFactor = d.console.twoFactor;
   if (!d.console.twoFactor) {
-    $("dTermNote").hidden = false; $("dTermNote").textContent = "Turn on two-factor login in Settings to use the console.";
+    $("dTermNote").hidden = false; setText("dTermNote", "Turn on two-factor login in Settings to use the console.");
   } else if (!dash.term && window.Terminal) {
     dash.term = createTerminal($("dTerm"), { readOnly: true, onState: st => setDot($("dTermDot"), st) });
     dash.term.connect();
@@ -269,11 +290,9 @@ viewHooks.dashboard = {
     fontReady.then(loadDashboard);
     clearInterval(dash.timer);
     dash.timer = setInterval(loadDashboard, 10_000);
-    if (dash.term) dash.term.connect();
   },
   hide() {
     clearInterval(dash.timer);
-    if (dash.term) dash.term.disconnect();
   },
 };
 
@@ -293,13 +312,13 @@ async function loadAnalytics() {
   }
   for (const b of seg.children) b.classList.toggle("active", b.dataset.site === an.site);
 
-  $("aVisitors").textContent = num(t.totals.visitors);
-  $("aVisitorsSub").textContent = `last ${an.days} days`;
-  $("aViews").textContent = num(t.totals.views);
-  $("aViewsSub").textContent = t.totals.visitors ? `${(t.totals.views / t.totals.visitors).toFixed(1)} per visitor` : "–";
-  $("aMail").textContent = num(d.mail.received);
-  $("aMailSub").textContent = `${num(d.mail.sent)} sent · ${num(d.mail.unread)} unread`;
-  $("aForms").textContent = num(d.mail.forms);
+  setText("aVisitors", num(t.totals.visitors));
+  setText("aVisitorsSub", `last ${an.days} days`);
+  setText("aViews", num(t.totals.views));
+  setText("aViewsSub", t.totals.visitors ? `${(t.totals.views / t.totals.visitors).toFixed(1)} per visitor` : "–");
+  setText("aMail", num(d.mail.received));
+  setText("aMailSub", `${num(d.mail.sent)} sent · ${num(d.mail.unread)} unread`);
+  setText("aForms", num(d.mail.forms));
 
   barChart($("aTraffic"), t.daily.map(x => ({ label: dayLabel(x.day), value: x.visitors, tip: [dayLabel(x.day, true), `${num(x.visitors)} visitors · ${num(x.views)} views`] })), { height: 200 });
   barList($("aPages"), t.pages, "No page views yet");

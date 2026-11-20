@@ -78,7 +78,7 @@ function serviceState(name) {
 }
 
 // are the public sites answering? checked every minute
-const SITES = (process.env.MONITOR_SITES || "nulldex.net,plately.nulldex.net").split(",").map(s => s.trim()).filter(Boolean);
+const SITES = (process.env.MONITOR_SITES || "").split(",").map(s => s.trim()).filter(Boolean);
 const siteStatus = {};
 async function checkSites() {
   for (const host of SITES) {

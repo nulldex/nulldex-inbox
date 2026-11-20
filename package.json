@@ -1,8 +1,8 @@
 {
-  "name": "nulldex-admin",
+  "name": "nulldex-administrative-website",
   "version": "1.0.0",
   "private": true,
-  "description": "Admin inbox for nulldex.net: receive, read and send contact@nulldex.net email.",
+  "description": "Self-hosted admin panel: dashboard, inbox for your own domain, privacy-friendly analytics and a web console for the server.",
   "main": "server.js",
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning server.js"

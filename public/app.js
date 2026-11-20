@@ -453,6 +453,10 @@ function showView(name) {
   const prev = currentView;
   currentView = name;
   for (const v of VIEWS) $(`view-${v}`).hidden = v !== name;
+  // quick fade on every switch; the bigger entrance (tiles/cards rising in) only the first time
+  const view = $(`view-${name}`);
+  view.classList.remove("entering"); void view.offsetWidth; view.classList.add("entering");
+  if (!view.dataset.seen) { view.dataset.seen = "1"; view.classList.add("first"); setTimeout(() => view.classList.remove("first"), 900); }
   document.querySelectorAll(".rail-btn[data-view]").forEach(b => b.classList.toggle("active", b.dataset.view === name));
   moveIndicator();
   const want = name === "dashboard" ? location.pathname : `#${name}`;

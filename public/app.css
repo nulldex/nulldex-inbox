@@ -61,7 +61,9 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: #5a5a5a
 
 /* LAYOUT */
 .app { display: grid; grid-template-columns: 60px 1fr; height: 100vh; overflow: hidden; }
-.view { min-height: 0; min-width: 0; animation: fade .3s var(--ease) both; }
+.view { min-height: 0; min-width: 0; }
+/* a quick fade when switching pages; the bigger entrance only the first time a page is opened */
+.view.entering { animation: fade .16s var(--ease) both; }
 .view-mail { display: grid; grid-template-columns: 208px minmax(300px, 380px) 1fr; }
 
 /* rail */
@@ -236,7 +238,8 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: #5a5a5a
 
 .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .tile { display: grid; gap: 4px; text-align: left; padding: 16px 18px; border: 1px solid var(--line-2); border-radius: var(--r-lg); background: var(--panel);
-  animation: rise .4s var(--ease) both; }
+}
+.view.first .tile { animation: rise .4s var(--ease) both; }
 .tiles .tile:nth-child(2) { animation-delay: .04s; } .tiles .tile:nth-child(3) { animation-delay: .08s; } .tiles .tile:nth-child(4) { animation-delay: .12s; }
 button.tile:hover, .card[data-go]:hover { border-color: var(--line-3); box-shadow: var(--glow); }
 .tile-label { color: var(--muted); font-size: .78rem; }
@@ -245,7 +248,8 @@ button.tile:hover, .card[data-go]:hover { border-color: var(--line-3); box-shado
 
 .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .card { position: relative; display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 16px 18px 18px; border: 1px solid var(--line-2); border-radius: var(--r-lg);
-  background: var(--panel); animation: rise .45s var(--ease) both; animation-delay: .1s; transition: border-color .16s var(--ease), box-shadow .2s var(--ease); }
+  background: var(--panel); transition: border-color .16s var(--ease), box-shadow .2s var(--ease); }
+.view.first .card { animation: rise .45s var(--ease) both; animation-delay: .1s; }
 .card[data-go] { cursor: pointer; }
 .card-wide { grid-column: 1 / -1; }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
@@ -272,7 +276,8 @@ button.tile:hover, .card[data-go]:hover { border-color: var(--line-3); box-shado
 .svg-chart .grid { stroke: var(--line); stroke-width: 1; }
 .svg-chart .axis { stroke: var(--line-3); stroke-width: 1; }
 .svg-chart .tick { fill: var(--faint); font-size: 10px; font-family: "JetBrains Mono", monospace; }
-.svg-chart .bar { fill: #cfcfcf; opacity: .78; transform-box: fill-box; transform-origin: bottom; animation: grow .5s var(--ease) both; animation-delay: calc(var(--i, 0) * 12ms); transition: opacity .15s, fill .15s; }
+.svg-chart .bar { fill: #cfcfcf; opacity: .78; transform-box: fill-box; transform-origin: bottom; transition: opacity .15s, fill .15s; }
+.svg-chart.anim .bar { animation: grow .5s var(--ease) both; animation-delay: calc(var(--i, 0) * 12ms); }
 .svg-chart .bar.on { fill: #fff; opacity: 1; filter: drop-shadow(0 0 6px rgba(255,255,255,.55)); }
 .svg-chart .hit { fill: transparent; cursor: crosshair; }
 .svg-chart .line { fill: none; stroke: #e6e6e6; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
@@ -288,8 +293,8 @@ button.tile:hover, .card[data-go]:hover { border-color: var(--line-3); box-shado
 
 /* ranked bars */
 .bars { list-style: none; display: grid; gap: 4px; }
-.bars li { position: relative; display: flex; justify-content: space-between; gap: 12px; padding: 6px 9px; border-radius: 4px; overflow: hidden; font-size: .84rem;
-  animation: rise .35s var(--ease) both; animation-delay: calc(var(--i, 0) * 30ms); }
+.bars li { position: relative; display: flex; justify-content: space-between; gap: 12px; padding: 6px 9px; border-radius: 4px; overflow: hidden; font-size: .84rem; }
+.bars.anim li { animation: rise .35s var(--ease) both; animation-delay: calc(var(--i, 0) * 30ms); }
 .bar-fill { position: absolute; inset: 0 auto 0 0; background: rgba(255,255,255,.06); border-right: 1px solid rgba(255,255,255,.18); border-radius: 4px; transition: width .5s var(--ease); }
 .bars li:hover .bar-fill { background: rgba(255,255,255,.1); }
 .bar-key { position: relative; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
