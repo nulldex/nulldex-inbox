@@ -56,70 +56,107 @@ $("loginForm").addEventListener("submit", async e => {
 });
 
 // ---------- list ----------
-async function loadList() {
+// animate: fade the new rows in (folder / address / search changes). Background refreshes swap silently.
+let listSeq = 0;
+async function loadList({ animate = false } = {}) {
+  const seq = ++listSeq;
   const params = new URLSearchParams({ folder: state.folder });
   if (state.q) params.set("q", state.q);
   if (state.mailbox) params.set("mailbox", state.mailbox);
-  const data = await api(`/api/messages?${params}`);
-  state.messages = data.messages;
-  updateCounts(data.counts);
-  renderList();
+  // keep the old list on screen (dimmed) until the new one arrives: no empty flash, no jump
+  const dim = animate ? setTimeout(() => $("list").classList.add("loading"), 90) : 0;
+  try {
+    const data = await api(`/api/messages?${params}`);
+    if (seq !== listSeq) return; // a newer request is on its way; drop this stale answer
+    state.messages = data.messages;
+    updateCounts(data.counts);
+    renderList(animate);
+  } finally {
+    clearTimeout(dim);
+    if (seq === listSeq) $("list").classList.remove("loading");
+  }
 }
 
 function updateCounts(c) {
   state.unread = c.unread;
   if (c.byMailbox) state.byMailbox = c.byMailbox;
   $("c-inbox").textContent = c.unread || "";
-  document.title = (c.unread ? `(${c.unread}) ` : "") + "Inbox · Nulldex Admin";
+  $("railUnread").hidden = !c.unread;
+  document.title = (c.unread ? `(${c.unread}) ` : "") + "Nulldex Admin";
   renderMailboxes();
 }
 
-// ---------- addresses (sidebar filter) ----------
-const shortAddr = a => a.replace(/@.*$/, "@");
+// ---------- addresses (tabs above the list) ----------
+const shortAddr = a => a.replace(/@.*$/, "");
 function renderMailboxes() {
   const all = [...state.addresses.map(a => a.address), ...state.others];
   const nav = $("mailboxes");
-  $("mailboxesLabel").hidden = nav.hidden = all.length < 2; // only worth showing with 2+ addresses
-  nav.replaceChildren();
-  const item = (value, label, unread, title) => {
-    const b = el("button", value === state.mailbox ? "active" : "");
-    b.dataset.mailbox = value; b.title = title || label;
-    b.append(el("span", "mb-name", label), el("span", "count", unread ? String(unread) : ""));
-    nav.append(b);
-  };
-  item("", "All addresses", 0);
-  for (const a of all) item(a, shortAddr(a), state.byMailbox[a] || 0, a);
+  nav.hidden = all.length < 2; // only worth showing with 2+ addresses
+  const values = ["", ...all];
+  // rebuild only when the set of addresses changes; otherwise update in place so the underline can slide
+  if (nav.dataset.keys !== values.join("|")) {
+    nav.dataset.keys = values.join("|");
+    nav.replaceChildren(...values.map(v => {
+      const b = el("button", "tab");
+      b.dataset.mailbox = v; b.title = v || "All addresses";
+      b.append(el("span", null, v ? shortAddr(v) : "All"), el("span", "count"));
+      return b;
+    }));
+  }
+  for (const b of nav.children) {
+    b.classList.toggle("active", b.dataset.mailbox === state.mailbox);
+    const n = b.dataset.mailbox ? state.byMailbox[b.dataset.mailbox] || 0 : 0;
+    b.lastChild.textContent = n ? String(n) : "";
+  }
 }
 $("mailboxes").addEventListener("click", e => {
   const b = e.target.closest("button[data-mailbox]");
-  if (!b) return;
+  if (!b || b.dataset.mailbox === state.mailbox) return;
   state.mailbox = b.dataset.mailbox;
-  $("app").classList.remove("menu-open");
-  closeMessage(); renderMailboxes(); loadList();
+  closeMessage(); renderMailboxes(); loadList({ animate: true });
 });
 
-function renderList() {
-  const list = $("list");
-  list.replaceChildren();
-  $("folderTitle").textContent = (state.q ? `Search: ${state.q}` : state.folder[0].toUpperCase() + state.folder.slice(1)) +
-    (state.mailbox ? ` · ${state.mailbox}` : "");
-  $("emptyTrash").hidden = !(state.folder === "trash" && state.messages.length && !state.q);
-  if (!state.messages.length) { list.append(el("li", "empty-list", state.q ? "Nothing found" : "No messages")); return; }
+function folderTitle() {
+  return state.q ? `Search: ${state.q}` : state.folder[0].toUpperCase() + state.folder.slice(1);
+}
 
-  for (const m of state.messages) {
+function renderList(animate = false) {
+  const list = $("list");
+  $("folderTitle").textContent = folderTitle();
+  $("emptyTrash").hidden = !(state.folder === "trash" && state.messages.length && !state.q);
+  if (animate) list.scrollTop = 0;
+  if (!state.messages.length) {
+    list.replaceChildren(el("li", "empty-list" + (animate ? " in" : ""), state.q ? "Nothing found" : "No messages"));
+    return;
+  }
+  const showBox = !state.mailbox && !$("mailboxes").hidden;
+  list.replaceChildren(...state.messages.map((m, i) => {
     const li = el("li");
+    li.dataset.id = m.id;
     if (!m.read) li.classList.add("unread");
     if (state.current && state.current.id === m.id) li.classList.add("selected");
+    if (animate && i < 20) { li.classList.add("in"); li.style.setProperty("--i", i); }
     const who = state.folder === "sent" ? `To: ${m.to_addr}` : (m.from_name || m.from_addr || "Unknown");
     const row1 = el("div", "l-row");
-    row1.append(el("span", "l-from", who), el("span", "l-date", fmtDate(m.date)));
+    row1.append(el("span", "l-from", who));
+    if (showBox && m.mailbox) row1.append(el("span", "l-box", shortAddr(m.mailbox)));
+    row1.append(el("span", "l-date", fmtDate(m.date)));
     const subj = el("div", "l-subject");
     if (m.source === "form") subj.append(el("span", "tag-form", "form"));
-    else if (!state.mailbox && m.mailbox && !$("mailboxes").hidden) subj.append(el("span", "tag-box", shortAddr(m.mailbox)));
     subj.append(document.createTextNode((m.has_attach ? "📎 " : "") + (m.subject || "(no subject)")));
     li.append(row1, subj, el("div", "l-snippet", m.snippet || ""));
     li.addEventListener("click", () => openMessage(m.id));
-    list.append(li);
+    return li;
+  }));
+}
+
+// mark the open message in the list without rebuilding it (no flicker)
+function markSelected() {
+  for (const li of $("list").children) {
+    const id = Number(li.dataset.id);
+    li.classList.toggle("selected", !!state.current && state.current.id === id);
+    const m = state.messages.find(x => x.id === id);
+    if (m) li.classList.toggle("unread", !m.read);
   }
 }
 
@@ -203,17 +240,25 @@ async function openMessage(id) {
   }
   renderBody(msg);
   $("app").classList.add("reading");
+  const art = $("message"); art.classList.remove("in"); void art.offsetWidth; art.classList.add("in");
 
   const item = state.messages.find(m => m.id === id);
-  if (item && !item.read) { item.read = 1; state.unread = Math.max(0, state.unread - (msg.folder === "inbox" ? 1 : 0)); updateCounts({ unread: state.unread }); }
-  renderList();
+  if (item && !item.read) {
+    item.read = 1;
+    if (msg.folder === "inbox") {
+      state.unread = Math.max(0, state.unread - 1);
+      if (msg.mailbox && state.byMailbox[msg.mailbox]) state.byMailbox[msg.mailbox]--;
+    }
+    updateCounts({ unread: state.unread });
+  }
+  markSelected();
 }
 
 function closeMessage() {
   state.current = null;
   $("message").hidden = true; $("emptyState").hidden = false;
   $("app").classList.remove("reading");
-  renderList();
+  markSelected();
 }
 
 async function moveCurrent(folder, note) {
@@ -382,16 +427,30 @@ $("folders").addEventListener("click", e => {
   document.querySelectorAll("#folders button").forEach(x => x.classList.toggle("active", x === b));
   state.folder = b.dataset.folder; state.q = ""; $("search").value = "";
   $("app").classList.remove("menu-open");
-  closeMessage(); loadList();
+  closeMessage(); loadList({ animate: true });
 });
 $("menuBtn").addEventListener("click", () => $("app").classList.toggle("menu-open"));
 $("refreshBtn").addEventListener("click", () => loadList().then(() => toast("Up to date")));
 let searchTimer;
 $("search").addEventListener("input", e => {
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => { state.q = e.target.value.trim(); closeMessage(); loadList(); }, 300);
+  searchTimer = setTimeout(() => { state.q = e.target.value.trim(); closeMessage(); loadList({ animate: true }); }, 300);
 });
 $("logoutBtn").addEventListener("click", async () => { await api("/api/logout", { method: "POST" }).catch(() => {}); showLogin(); });
+
+// ---------- rail: Mail / Dashboard / Console ----------
+const VIEWS = ["mail", "dashboard", "console"];
+function showView(name) {
+  if (!VIEWS.includes(name)) name = "mail";
+  for (const v of VIEWS) $(`view-${v}`).hidden = v !== name;
+  document.querySelectorAll(".rail-btn[data-view]").forEach(b => b.classList.toggle("active", b.dataset.view === name));
+  if (location.hash.slice(1) !== name) history.replaceState(null, "", name === "mail" ? location.pathname : `#${name}`);
+}
+$("rail").addEventListener("click", e => {
+  const b = e.target.closest(".rail-btn[data-view]");
+  if (b) showView(b.dataset.view);
+});
+window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
 
 // ---------- start ----------
 let pollTimer;
@@ -403,7 +462,8 @@ async function start() {
     $("meFrom").textContent = me.from;
     renderMailboxes();
     $("login").hidden = true; $("app").hidden = false;
-    await loadList();
+    showView(location.hash.slice(1));
+    await loadList({ animate: true });
     clearInterval(pollTimer);
     pollTimer = setInterval(async () => {
       try {
