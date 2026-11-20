@@ -21,6 +21,8 @@ No mail server to run and no port 25: everything travels over HTTPS.
 ## Features
 
 - **Inbox, Sent, Archive and Trash**, with unread counts, search (SQLite FTS5, diacritic-insensitive) and attachments
+- **Several addresses in one inbox** (e.g. a public `contact@` and a personal address): filter by address, per-address
+  unread counts, and pick the From address when writing (replies default to the address the mail came to)
 - **Reply and compose** with proper `In-Reply-To` / `References` headers, so replies thread in Gmail and Outlook
 - **Contact form endpoint** for your public site, with a honeypot and rate limiting
 - **Never loses mail:** if the server is unreachable, the Cloudflare Worker forwards the email to a backup address
@@ -73,9 +75,13 @@ example.com {
 ## CLI
 
 ```bash
-nulldex-admin set-password   # set or change the admin password (logs out all sessions)
-nulldex-admin disable-2fa    # emergency: turn off two-factor login if you lost your phone and recovery codes
-nulldex-admin stats          # message counts per folder
+nulldex-admin set-password                          # set or change the admin password (logs out all sessions)
+nulldex-admin disable-2fa                           # emergency: turn off two-factor login if you lost your phone and recovery codes
+nulldex-admin addresses                             # list your addresses
+nulldex-admin add-address <address> [sender name]   # another address you can send from and filter by
+nulldex-admin set-name <address> <sender name>      # the name recipients see for that address
+nulldex-admin remove-address <address>              # stop sending from an address
+nulldex-admin stats                                 # message counts per address and folder
 ```
 
 ## Project structure

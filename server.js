@@ -81,29 +81,47 @@ function serveStatic(req, res, urlPath) {
 }
 
 // ---------- message queries ----------
-const LIST_COLS = `m.id, m.folder, m.source, m.from_name, m.from_addr, m.to_addr, m.subject,
+const LIST_COLS = `m.id, m.folder, m.source, m.mailbox, m.from_name, m.from_addr, m.to_addr, m.subject,
   substr(replace(replace(m.text, char(10), ' '), char(13), ' '), 1, 160) AS snippet,
   m.date, m.read, m.starred, m.has_attach`;
 
-function listMessages({ folder, q, page }) {
+// mailbox: one address to show, or "" for all of them
+function listMessages({ folder, q, page, mailbox }) {
   const limit = 50, offset = (Math.max(1, page) - 1) * limit;
+  const mb = mailbox ? "AND m.mailbox = :mailbox" : "";
+  const params = { limit, offset };
+  if (mailbox) params.mailbox = mailbox;
   if (q) {
-    const match = q.split(/\s+/).filter(Boolean).map(w => `"${w.replace(/"/g, "")}"*`).join(" ");
+    params.match = q.split(/\s+/).filter(Boolean).map(w => `"${w.replace(/"/g, "")}"*`).join(" ");
     return db.prepare(`SELECT ${LIST_COLS} FROM messages_fts f JOIN messages m ON m.id = f.rowid
-      WHERE messages_fts MATCH ? AND m.folder != 'trash' ORDER BY m.date DESC LIMIT ? OFFSET ?`).all(match, limit, offset);
+      WHERE messages_fts MATCH :match AND m.folder != 'trash' ${mb} ORDER BY m.date DESC LIMIT :limit OFFSET :offset`).all(params);
   }
-  return db.prepare(`SELECT ${LIST_COLS} FROM messages m WHERE m.folder = ? ORDER BY m.date DESC LIMIT ? OFFSET ?`)
-    .all(folder, limit, offset);
+  params.folder = folder;
+  return db.prepare(`SELECT ${LIST_COLS} FROM messages m WHERE m.folder = :folder ${mb}
+    ORDER BY m.date DESC LIMIT :limit OFFSET :offset`).all(params);
 }
 
+// unread = inbox unread in total; byMailbox = inbox unread per address
 function counts() {
-  const out = { inbox: 0, sent: 0, archive: 0, trash: 0, unread: 0 };
+  const out = { inbox: 0, sent: 0, archive: 0, trash: 0, unread: 0, byMailbox: {} };
   for (const r of db.prepare("SELECT folder, COUNT(*) n, SUM(read = 0) u FROM messages GROUP BY folder").all()) {
     out[r.folder] = r.n;
     if (r.folder === "inbox") out.unread = r.u || 0;
   }
+  for (const r of db.prepare("SELECT mailbox, SUM(read = 0) u FROM messages WHERE folder = 'inbox' AND mailbox IS NOT NULL GROUP BY mailbox").all()) {
+    out.byMailbox[r.mailbox] = r.u || 0;
+  }
   return out;
 }
+
+// your addresses (can send from them) plus any other address that received mail (catch-all), for the sidebar
+function mailboxes() {
+  const own = db.prepare("SELECT address, name FROM addresses ORDER BY address = lower(?) DESC, address").all(config.mailFrom);
+  const other = db.prepare(`SELECT DISTINCT mailbox AS address FROM messages
+    WHERE mailbox IS NOT NULL AND mailbox NOT IN (SELECT address FROM addresses) ORDER BY mailbox`).all();
+  return { addresses: own, others: other.map(r => r.address) };
+}
+const isOwnAddress = a => !!db.prepare("SELECT 1 FROM addresses WHERE address = ?").get(String(a || "").toLowerCase());
 
 function deleteForever(id) {
   db.prepare("DELETE FROM messages WHERE id = ?").run(id);
@@ -180,7 +198,7 @@ async function handleAdmin(req, res, url) {
   }
   if (p === "/api/me" && req.method === "GET") {
     return send(res, 200, {
-      ok: true, from: config.mailFrom, canSend: !!config.brevoApiKey,
+      ok: true, from: config.mailFrom.toLowerCase(), canSend: !!config.brevoApiKey, ...mailboxes(),
       twoFactor: totp.isEnabled(), recoveryLeft: totp.isEnabled() ? totp.recoveryLeft() : 0,
     });
   }
@@ -211,11 +229,20 @@ async function handleAdmin(req, res, url) {
   }
   if (p === "/api/counts" && req.method === "GET") return send(res, 200, counts());
 
+  // change the sender name for one of your addresses
+  if (p === "/api/addresses" && req.method === "PATCH") {
+    const b = await readJson(req);
+    if (!isOwnAddress(b.address)) throw new HttpError(404, "Unknown address");
+    db.prepare("UPDATE addresses SET name = ? WHERE address = ?").run(str(b.name, 80) || null, String(b.address).toLowerCase());
+    return send(res, 200, { ok: true });
+  }
+
   if (p === "/api/messages" && req.method === "GET") {
     const folder = FOLDERS.includes(url.searchParams.get("folder")) ? url.searchParams.get("folder") : "inbox";
     const q = str(url.searchParams.get("q"), 200);
     const page = Number(url.searchParams.get("page")) || 1;
-    return send(res, 200, { messages: listMessages({ folder, q, page }), counts: counts() });
+    const mailbox = str(url.searchParams.get("mailbox"), 254).toLowerCase();
+    return send(res, 200, { messages: listMessages({ folder, q, page, mailbox }), counts: counts() });
   }
 
   if (p === "/api/send" && req.method === "POST") {
@@ -224,7 +251,9 @@ async function handleAdmin(req, res, url) {
     const all = [...to.split(","), ...cc.split(",")].map(s => s.trim()).filter(Boolean);
     if (!to || !all.every(isEmail)) throw new HttpError(400, "Check the recipient addresses.");
     if (!subject || !text) throw new HttpError(400, "Subject and message are required.");
-    const id = await mail.sendMail({ to, cc, subject, text, inReplyTo: str(b.inReplyTo, 500) || null });
+    const from = str(b.from, 254).toLowerCase() || config.mailFrom.toLowerCase();
+    if (!isOwnAddress(from)) throw new HttpError(400, "You can only send from your own addresses.");
+    const id = await mail.sendMail({ from, to, cc, subject, text, inReplyTo: str(b.inReplyTo, 500) || null });
     return send(res, 200, { ok: true, id });
   }
 
@@ -298,6 +327,9 @@ const server = http.createServer(async (req, res) => {
     else res.end();
   }
 });
+
+// the site address (MAIL_FROM) is always one of yours. Done here, not in db.js: the CLI runs without the env file.
+db.prepare("INSERT OR IGNORE INTO addresses (address, name) VALUES (lower(?), ?)").run(config.mailFrom, config.mailFromName);
 
 server.listen(config.port, config.host, () => {
   console.log(`nulldex-admin listening on ${config.host}:${config.port}`);

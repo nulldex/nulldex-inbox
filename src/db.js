@@ -71,6 +71,22 @@ CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
   INSERT INTO messages_fts(messages_fts, rowid, subject, from_name, from_addr, text)
   VALUES ('delete', old.id, old.subject, old.from_name, old.from_addr, old.text);
 END;
+
+-- your own addresses: you can send from each, and the inbox can be filtered by them
+CREATE TABLE IF NOT EXISTS addresses (
+  address TEXT PRIMARY KEY COLLATE NOCASE,
+  name    TEXT                               -- sender name shown to recipients
+);
 `);
+
+// which of your addresses a message arrived at / was sent from (added after the first version)
+if (!db.prepare("PRAGMA table_info(messages)").all().some(c => c.name === "mailbox")) {
+  db.exec("ALTER TABLE messages ADD COLUMN mailbox TEXT");
+  db.prepare(`UPDATE messages SET mailbox = lower(COALESCE(
+    CASE WHEN source = 'sent' THEN from_addr END,
+    json_extract(meta, '$.envelopeTo'),
+    ?)) WHERE mailbox IS NULL`).run(config.mailFrom);
+}
+db.exec("CREATE INDEX IF NOT EXISTS idx_messages_mailbox ON messages(mailbox, folder, date DESC)");
 
 module.exports = db;

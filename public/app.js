@@ -1,7 +1,9 @@
 "use strict";
 
 const $ = id => document.getElementById(id);
-const state = { folder: "inbox", q: "", messages: [], current: null, unread: 0, canSend: false, from: "" };
+// mailbox: "" = all addresses, otherwise show only mail to/from that one address
+const state = { folder: "inbox", q: "", mailbox: "", messages: [], current: null, unread: 0, canSend: false,
+  from: "", addresses: [], others: [], byMailbox: {} };
 
 // ---------- API ----------
 async function api(path, opts = {}) {
@@ -57,6 +59,7 @@ $("loginForm").addEventListener("submit", async e => {
 async function loadList() {
   const params = new URLSearchParams({ folder: state.folder });
   if (state.q) params.set("q", state.q);
+  if (state.mailbox) params.set("mailbox", state.mailbox);
   const data = await api(`/api/messages?${params}`);
   state.messages = data.messages;
   updateCounts(data.counts);
@@ -65,14 +68,41 @@ async function loadList() {
 
 function updateCounts(c) {
   state.unread = c.unread;
+  if (c.byMailbox) state.byMailbox = c.byMailbox;
   $("c-inbox").textContent = c.unread || "";
   document.title = (c.unread ? `(${c.unread}) ` : "") + "Inbox · Nulldex Admin";
+  renderMailboxes();
 }
+
+// ---------- addresses (sidebar filter) ----------
+const shortAddr = a => a.replace(/@.*$/, "@");
+function renderMailboxes() {
+  const all = [...state.addresses.map(a => a.address), ...state.others];
+  const nav = $("mailboxes");
+  $("mailboxesLabel").hidden = nav.hidden = all.length < 2; // only worth showing with 2+ addresses
+  nav.replaceChildren();
+  const item = (value, label, unread, title) => {
+    const b = el("button", value === state.mailbox ? "active" : "");
+    b.dataset.mailbox = value; b.title = title || label;
+    b.append(el("span", "mb-name", label), el("span", "count", unread ? String(unread) : ""));
+    nav.append(b);
+  };
+  item("", "All addresses", 0);
+  for (const a of all) item(a, shortAddr(a), state.byMailbox[a] || 0, a);
+}
+$("mailboxes").addEventListener("click", e => {
+  const b = e.target.closest("button[data-mailbox]");
+  if (!b) return;
+  state.mailbox = b.dataset.mailbox;
+  $("app").classList.remove("menu-open");
+  closeMessage(); renderMailboxes(); loadList();
+});
 
 function renderList() {
   const list = $("list");
   list.replaceChildren();
-  $("folderTitle").textContent = state.q ? `Search: ${state.q}` : state.folder[0].toUpperCase() + state.folder.slice(1);
+  $("folderTitle").textContent = (state.q ? `Search: ${state.q}` : state.folder[0].toUpperCase() + state.folder.slice(1)) +
+    (state.mailbox ? ` · ${state.mailbox}` : "");
   $("emptyTrash").hidden = !(state.folder === "trash" && state.messages.length && !state.q);
   if (!state.messages.length) { list.append(el("li", "empty-list", state.q ? "Nothing found" : "No messages")); return; }
 
@@ -85,6 +115,7 @@ function renderList() {
     row1.append(el("span", "l-from", who), el("span", "l-date", fmtDate(m.date)));
     const subj = el("div", "l-subject");
     if (m.source === "form") subj.append(el("span", "tag-form", "form"));
+    else if (!state.mailbox && m.mailbox && !$("mailboxes").hidden) subj.append(el("span", "tag-box", shortAddr(m.mailbox)));
     subj.append(document.createTextNode((m.has_attach ? "📎 " : "") + (m.subject || "(no subject)")));
     li.append(row1, subj, el("div", "l-snippet", m.snippet || ""));
     li.addEventListener("click", () => openMessage(m.id));
@@ -214,12 +245,18 @@ $("emptyTrash").addEventListener("click", async () => {
 });
 
 // ---------- compose / reply ----------
-function openCompose({ to = "", subject = "", text = "", inReplyTo = "", title = "New email" } = {}) {
+const ownAddr = a => state.addresses.some(x => x.address === a);
+function openCompose({ to = "", subject = "", text = "", inReplyTo = "", title = "New email", from = "" } = {}) {
   const f = $("composeForm");
+  const sel = $("composeFrom");
+  sel.replaceChildren(...state.addresses.map(a => {
+    const o = el("option", null, a.name ? `${a.name} <${a.address}>` : a.address); o.value = a.address; return o;
+  }));
+  // reply from the address the mail came to; new mail from the address you're filtering by; else the main one
+  sel.value = [from, state.mailbox, state.from].find(ownAddr) || state.addresses[0]?.address || "";
   f.to.value = to; f.cc.value = ""; f.subject.value = subject; f.text.value = text; f.inReplyTo.value = inReplyTo;
   $("composeTitle").textContent = title;
   $("composeError").textContent = state.canSend ? "" : "Sending isn't set up yet (Brevo key missing).";
-  $("composeFrom").textContent = `from ${state.from}`;
   $("compose").showModal();
   (to ? f.text : f.to).focus();
   if (to) f.text.setSelectionRange(0, 0);
@@ -236,6 +273,7 @@ $("replyBtn").addEventListener("click", () => {
     subject: /^re:/i.test(m.subject || "") ? m.subject : `Re: ${m.subject || ""}`,
     text: `\n\n\nOn ${fmtDate(m.date, true)}, ${m.from_name || m.from_addr} wrote:\n${quoted}`,
     inReplyTo: m.message_id || "",
+    from: m.mailbox || "",
   });
 });
 
@@ -245,7 +283,7 @@ $("composeForm").addEventListener("submit", async e => {
   btn.disabled = true; $("composeError").textContent = "";
   try {
     await api("/api/send", { method: "POST", body: {
-      to: f.to.value, cc: f.cc.value, subject: f.subject.value, text: f.text.value, inReplyTo: f.inReplyTo.value || undefined,
+      from: f.from.value, to: f.to.value, cc: f.cc.value, subject: f.subject.value, text: f.text.value, inReplyTo: f.inReplyTo.value || undefined,
     }});
     $("compose").close(); toast("Sent ✓");
     if (state.folder === "sent") loadList();
@@ -267,6 +305,13 @@ function showTfView(view, me) {
 $("secBtn").addEventListener("click", async () => {
   const me = await api("/api/me");
   showTfView(me.twoFactor ? "tfOn" : "tfOff", me);
+  state.addresses = me.addresses || [];
+  const list = $("namesList"); list.replaceChildren(); $("namesError").textContent = "";
+  for (const a of state.addresses) {
+    const lab = el("label", null, a.address), inp = el("input");
+    inp.name = a.address; inp.value = a.name || ""; inp.maxLength = 80; inp.placeholder = "Sender name";
+    lab.append(inp); list.append(lab);
+  }
   $("tfOn").reset(); $("tfDisError").textContent = "";
   $("secDialog").showModal();
 });
@@ -302,6 +347,20 @@ $("tfOn").addEventListener("submit", async e => {
     await api("/api/2fa/disable", { method: "POST", body: { password: $("tfDisPw").value, code: $("tfDisCode").value } });
     toast("2FA disabled"); showTfView("tfOff");
   } catch (err) { $("tfDisError").textContent = err.message; }
+});
+
+$("namesForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  try {
+    for (const inp of $("namesList").querySelectorAll("input")) {
+      const a = state.addresses.find(x => x.address === inp.name);
+      if (a && (a.name || "") !== inp.value.trim()) {
+        await api("/api/addresses", { method: "PATCH", body: { address: inp.name, name: inp.value.trim() } });
+        a.name = inp.value.trim();
+      }
+    }
+    toast("Names saved");
+  } catch (err) { $("namesError").textContent = err.message; }
 });
 
 // ---------- password ----------
@@ -340,7 +399,9 @@ async function start() {
   try {
     const me = await api("/api/me");
     state.canSend = me.canSend; state.from = me.from;
+    state.addresses = me.addresses || []; state.others = me.others || [];
     $("meFrom").textContent = me.from;
+    renderMailboxes();
     $("login").hidden = true; $("app").hidden = false;
     await loadList();
     clearInterval(pollTimer);

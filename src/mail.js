@@ -13,9 +13,9 @@ const safeName = s => (s || "file").replace(/[^\w.\- ]+/g, "_").slice(0, 120) ||
 
 const insertMessage = db.prepare(`
   INSERT INTO messages (folder, source, message_id, in_reply_to, references_, from_name, from_addr, reply_to,
-                        to_addr, cc_addr, subject, text, html, date, read, has_attach, meta, created)
+                        to_addr, cc_addr, subject, text, html, date, read, has_attach, meta, created, mailbox)
   VALUES (:folder, :source, :message_id, :in_reply_to, :references_, :from_name, :from_addr, :reply_to,
-          :to_addr, :cc_addr, :subject, :text, :html, :date, :read, :has_attach, :meta, :created)
+          :to_addr, :cc_addr, :subject, :text, :html, :date, :read, :has_attach, :meta, :created, :mailbox)
 `);
 const insertAttachment = db.prepare(
   "INSERT INTO attachments (message_id, filename, content_type, size, path) VALUES (?, ?, ?, ?, ?)"
@@ -26,7 +26,7 @@ function save(fields) {
     folder: "inbox", source: "email", message_id: null, in_reply_to: null, references_: null,
     from_name: null, from_addr: null, reply_to: null, to_addr: null, cc_addr: null,
     subject: "(no subject)", text: "", html: null, date: Date.now(), read: 0, has_attach: 0,
-    meta: null, created: Date.now(), ...fields,
+    meta: null, created: Date.now(), mailbox: config.mailFrom.toLowerCase(), ...fields,
   };
   return Number(insertMessage.run(row).lastInsertRowid);
 }
@@ -37,7 +37,9 @@ async function storeInbound(raw, envelope = {}) {
 
   // Skip duplicates (Cloudflare can retry)
   if (mail.messageId) {
-    const dup = db.prepare("SELECT id FROM messages WHERE message_id = ? AND source = 'email'").get(mail.messageId);
+    const to = (envelope.to || "").toLowerCase();
+    const dup = db.prepare("SELECT id FROM messages WHERE message_id = ? AND source = 'email' AND (mailbox = ? OR ? = '')")
+      .get(mail.messageId, to, to);
     if (dup) return dup.id;
   }
 
@@ -56,8 +58,10 @@ async function storeInbound(raw, envelope = {}) {
 
   const from = firstAddr(mail.from);
   const replyTo = firstAddr(mail.replyTo);
+  const mailbox = (envelope.to || firstAddr(mail.to).address || config.mailFrom).toLowerCase();
   const id = save({
     source: "email",
+    mailbox,
     message_id: mail.messageId || null,
     in_reply_to: mail.inReplyTo || null,
     references_: Array.isArray(mail.references) ? mail.references.join(" ") : mail.references || null,
@@ -107,7 +111,10 @@ const textToHtml = t =>
     escapeHtml(t).replace(/\n/g, "<br>")
   }</div>`;
 
-async function sendMail({ to, cc, subject, text, inReplyTo }) {
+// from: one of your addresses (the caller checks it is in the addresses table)
+async function sendMail({ from, to, cc, subject, text, inReplyTo }) {
+  from = (from || config.mailFrom).toLowerCase();
+  const fromName = db.prepare("SELECT name FROM addresses WHERE address = ?").get(from)?.name || config.mailFromName;
   if (!config.brevoApiKey) {
     const err = new Error("Sending is not set up yet (missing Brevo API key).");
     err.status = 503;
@@ -121,7 +128,7 @@ async function sendMail({ to, cc, subject, text, inReplyTo }) {
     const orig = db.prepare("SELECT references_ FROM messages WHERE message_id = ?").get(inReplyTo);
     references = [orig?.references_, inReplyTo].filter(Boolean).join(" ");
   }
-  const messageId = `<${crypto.randomUUID()}@${config.messageIdDomain}>`;
+  const messageId = `<${crypto.randomUUID()}@${from.split("@")[1]}>`;
   const headers = { "Message-ID": messageId };
   if (inReplyTo) { headers["In-Reply-To"] = inReplyTo; headers["References"] = references; }
 
@@ -129,7 +136,7 @@ async function sendMail({ to, cc, subject, text, inReplyTo }) {
     method: "POST",
     headers: { "api-key": config.brevoApiKey, "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify({
-      sender: { name: config.mailFromName, email: config.mailFrom },
+      sender: { name: fromName, email: from },
       to: toList.map(email => ({ email })),
       ...(ccList.length ? { cc: ccList.map(email => ({ email })) } : {}),
       subject,
@@ -146,9 +153,9 @@ async function sendMail({ to, cc, subject, text, inReplyTo }) {
   }
 
   return save({
-    folder: "sent", source: "sent", read: 1,
+    folder: "sent", source: "sent", read: 1, mailbox: from,
     message_id: messageId, in_reply_to: inReplyTo || null, references_: references,
-    from_name: config.mailFromName, from_addr: config.mailFrom,
+    from_name: fromName, from_addr: from,
     to_addr: toList.join(", "), cc_addr: ccList.join(", ") || null,
     subject, text,
   });

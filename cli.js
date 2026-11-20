@@ -40,8 +40,29 @@ function askHidden(prompt) {
     require("./src/totp").disable();
     console.log("Two-factor authentication disabled. Log in with your password and set it up again.");
   } else if (cmd === "stats") {
-    console.table(db.prepare("SELECT folder, COUNT(*) AS messages, SUM(read = 0) AS unread FROM messages GROUP BY folder").all());
+    console.table(db.prepare("SELECT mailbox, folder, COUNT(*) AS messages, SUM(read = 0) AS unread FROM messages GROUP BY mailbox, folder").all());
+  } else if (cmd === "addresses") {
+    console.table(db.prepare("SELECT address, name AS sender_name FROM addresses ORDER BY address").all());
+  } else if (cmd === "add-address" || cmd === "set-name") {
+    // nulldex-admin add-address leo@example.com Leo Example
+    const address = (process.argv[3] || "").trim().toLowerCase();
+    const name = process.argv.slice(4).join(" ").trim() || null;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) { console.error(`Usage: nulldex-admin ${cmd} <address> [sender name]`); process.exit(1); }
+    db.prepare("INSERT INTO addresses (address, name) VALUES (?, ?) ON CONFLICT(address) DO UPDATE SET name = COALESCE(excluded.name, name)")
+      .run(address, name);
+    console.log(`${address}${name ? ` (sends as "${name}")` : ""} is one of your addresses: its mail is filtered in the sidebar and you can send from it.`);
+  } else if (cmd === "remove-address") {
+    const address = (process.argv[3] || "").trim().toLowerCase();
+    db.prepare("DELETE FROM addresses WHERE address = ?").run(address);
+    console.log(`${address} removed (its existing mail stays; you just can't send from it any more).`);
   } else {
-    console.log("Usage: nulldex-admin set-password | disable-2fa | stats");
+    console.log(`Usage: nulldex-admin <command>
+  set-password                          set or change the admin password (logs out all sessions)
+  disable-2fa                           emergency: turn off two-factor login
+  addresses                             list your addresses
+  add-address <address> [sender name]   add an address you can send from and filter by
+  set-name <address> <sender name>      change the name people see when you send from it
+  remove-address <address>              stop sending from an address
+  stats                                 message counts per address and folder`);
   }
 })();
